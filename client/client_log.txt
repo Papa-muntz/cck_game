@@ -1,2 +1,4 @@
-  ➜  Local:   http://localhost:5173/
-  ➜  Network: http://192.168.0.2:5173/  eth0
+Port 5173 is in use, trying another one...
+Port 5174 is in use, trying another one...
+  ➜  Local:   http://localhost:5175/
+  ➜  Network: http://192.168.0.2:5175/  eth0

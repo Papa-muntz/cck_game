@@ -42,13 +42,15 @@ export interface GameState {
     }
   };
   players: Record<string, Player>;
-  // Round specific state placeholders
+
+  // Specific data for active rounds
   roundState: any;
 }
 
 export interface ClientToServerEvents {
   join: (data: { name: string; token: string }) => void;
   reconnect: (data: { token: string }) => void;
+
   // Host events
   hostLogin: (password: string) => void;
   createGame: () => void;
@@ -65,13 +67,15 @@ export interface ClientToServerEvents {
 
   // Game events
   r1SubmitPath: (path: string[]) => void;
-  r2SubmitNetwork: (networkState: any) => void;
-  r3SubmitModules: (modules: any[]) => void;
+  r2SubmitNetwork: (cells: number[][]) => void;
+  r3SubmitModules: (modules: string[]) => void;
   r4SubmitCard: (cardId: string, action: 'ALLOW' | 'BLOCK') => void;
   r5SubmitAction: (actionId: string) => void;
 
   // Terminal events
   registerTerminal: (code: string) => void;
+
+  requestState: () => void;
 }
 
 export interface ServerToClientEvents {
@@ -79,9 +83,16 @@ export interface ServerToClientEvents {
   joined: (data: { playerId: string; token: string }) => void;
   error: (message: string) => void;
   publicEvent: (message: string) => void;
-  // Role specific updates
+
+  // Role/Round specific updates (targeted events)
   playerData: (player: Player) => void;
   roundSpecificData: (data: any) => void;
+  r1Result: (data: { success: boolean, time: number, errorIndex?: number }) => void;
+  r2Result: (data: { success: boolean }) => void;
+  r3Error: (data: { blockedUntil: number }) => void;
+  r4CardResult: (data: { success: boolean, explanation: string, nextCardIndex: number }) => void;
+  r5ActionError: (data: { blockedUntil: number, message: string }) => void;
+
   hostAuthenticated: (token: string) => void;
   terminalRegistered: (team: Team) => void;
 }

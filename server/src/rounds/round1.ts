@@ -82,3 +82,37 @@ export function calculateOptimalTime(grid: Grid): number {
 
   return Infinity; // If no path found
 }
+
+export function evaluatePath(grid: Grid, path: string[]): { success: boolean, time: number, errorIndex: number } {
+  let curr = { ...grid.start };
+  let time = 0;
+
+  for (let i = 0; i < path.length; i++) {
+    const p = path[i];
+    let nx = curr.x;
+    let ny = curr.y;
+
+    if (p === 'UP') ny -= 1;
+    else if (p === 'DOWN') ny += 1;
+    else if (p === 'LEFT') nx -= 1;
+    else if (p === 'RIGHT') nx += 1;
+
+    if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height) {
+      return { success: false, time, errorIndex: i };
+    }
+
+    const cellType = grid.cells[ny][nx];
+    if (cellType === 'WALL') {
+      return { success: false, time, errorIndex: i };
+    }
+
+    time += CELL_COST[cellType];
+    curr = { x: nx, y: ny };
+
+    if (curr.x === grid.finish.x && curr.y === grid.finish.y) {
+      return { success: true, time, errorIndex: -1 };
+    }
+  }
+
+  return { success: false, time, errorIndex: path.length };
+}
