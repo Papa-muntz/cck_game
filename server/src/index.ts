@@ -26,9 +26,11 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
 });
 
 app.use(cors());
-app.use(express.static(path.join(__dirname, '../../client/dist')));
 
-// Fallback logic for SPA that works with express 5 / path-to-regexp v8
+const clientDistPath = path.resolve(__dirname, '../../../../client/dist');
+
+app.use(express.static(clientDistPath));
+
 app.use((req, res, next) => {
     if (req.path.startsWith('/socket.io')) {
         return next();
@@ -43,9 +45,9 @@ app.use((req, res, next) => {
                 return res.status(500).json({ error: 'Database error' });
             }
         }
-        return next();
+        return res.status(404).json({ error: 'API route not found' });
     }
-    res.sendFile(path.resolve(__dirname, '../../client/dist/index.html'));
+    res.sendFile(path.join(clientDistPath, 'index.html'));
 });
 
 let currentGame: GameState = {
@@ -152,7 +154,7 @@ function generateRoundData() {
         io.emit('roundSpecificData', { modules: mDataB.modules, team: 'TEAM_B' });
 
         const sendHints = (waveIdx: number) => {
-            if (currentGame.isPaused) return; // Note: In full implementation, we'd need to pause timer actually, but here we just block sending.
+            if (currentGame.isPaused) return;
             Object.values(currentGame.players).forEach(p => {
                 if (p.team === 'TEAM_A') {
                     io.to(p.socketId).emit('roundSpecificData', { hints: mDataA.hints.slice(0, waveIdx + 1).flat() });
@@ -189,9 +191,6 @@ function generateRoundData() {
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  // Basic mechanism for reconnect based on token could be here, for now token is just socket.id in simple test.
-
-  // Send state safely (hide scores if not final)
   const safeState = JSON.parse(JSON.stringify(stateMachine.state));
   if (safeState.status !== 'FINAL') {
       safeState.teams.TEAM_A.score = 0;
@@ -200,6 +199,10 @@ io.on('connection', (socket) => {
       safeState.teams.TEAM_B.roundScores = {};
   }
   socket.emit('gameStateUpdate', safeState);
+
+  socket.on('requestState', () => {
+    socket.emit('gameStateUpdate', safeState);
+  });
 
   socket.on('join', (data) => {
     const playerId = socket.id;
@@ -229,7 +232,6 @@ io.on('connection', (socket) => {
   socket.on('hostLogin', (password) => {
       if (password === process.env.HOST_PASSWORD) {
           socket.emit('hostAuthenticated', 'host_token');
-          // Host gets real state
           socket.emit('gameStateUpdate', stateMachine.state);
       } else {
           socket.emit('error', 'Неверный пароль');

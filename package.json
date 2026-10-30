@@ -8,8 +8,9 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npm run build -w client",
-    "start": "node server/dist/index.js"
+    "build": "npm run build:server && npm run build -w client",
+    "start": "node server/dist/server/src/index.js",
+    "build:server": "npx tsc -p server/tsconfig.json"
   },
   "repository": {
     "type": "git",
