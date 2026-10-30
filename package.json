@@ -1,0 +1,32 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npm run build -w client",
+    "start": "node server/dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Papa-muntz/cck_game.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Papa-muntz/cck_game/issues"
+  },
+  "homepage": "https://github.com/Papa-muntz/cck_game#readme",
+  "workspaces": [
+    "client",
+    "server",
+    "shared",
+    "tests"
+  ]
+}
