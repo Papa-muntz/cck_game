@@ -5,7 +5,7 @@ import cors from 'cors';
 import { ClientToServerEvents, ServerToClientEvents, GameState, Player, Team } from '../../shared/src/types';
 import dotenv from 'dotenv';
 import path from 'path';
-import { saveGameState, loadGameState, default as db } from './db';
+import { saveGameState, loadGameState, saveRound1Score, default as db } from './db';
 import { StateMachine } from './stateMachine';
 import { generateRound1Grid, calculateOptimalTime, evaluatePath } from './rounds/round1';
 import { generateNetwalkGrid, validateNetwalkSolution } from './rounds/round2';
@@ -13,6 +13,7 @@ import { generateRound3Modules, validateRound3Solution } from './rounds/round3';
 import { generatePlayerCards } from './rounds/round4';
 import { generateRound5Actions } from './rounds/round5';
 import { calculateRound1Score, calculateRound2IndividualScore, calculateRound2TeamScore, calculateRound3Score, calculateRound4IndividualScore, calculateRound4TeamScore, calculateRound5Score } from './scoring';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -66,6 +67,8 @@ let currentGame: GameState = {
 
 const stateMachine = new StateMachine(currentGame);
 let activeTimers: NodeJS.Timeout[] = [];
+let gameLoopTimer: NodeJS.Timeout | null = null;
+let playerTokenMap: Record<string, string> = {}; // Maps token -> playerId
 
 function clearTimers() {
     activeTimers.forEach(t => clearTimeout(t));
@@ -77,8 +80,11 @@ function processRoundEnd(round: number) {
         const bestA = currentGame.roundState.bestTimes['TEAM_A'];
         const bestB = currentGame.roundState.bestTimes['TEAM_B'];
         const optimal = currentGame.roundState.optimalTime;
-        currentGame.teams['TEAM_A'].roundScores[1] = calculateRound1Score(optimal, bestA);
-        currentGame.teams['TEAM_B'].roundScores[1] = calculateRound1Score(optimal, bestB);
+        const scoreA = calculateRound1Score(optimal, bestA.time);
+        const scoreB = calculateRound1Score(optimal, bestB.time);
+        currentGame.teams['TEAM_A'].roundScores[1] = scoreA;
+        currentGame.teams['TEAM_B'].roundScores[1] = scoreB;
+        saveRound1Score(currentGame.id, scoreA, scoreB);
     } else if (round === 2) {
         const aScores: number[] = [];
         const bScores: number[] = [];
@@ -121,6 +127,39 @@ function processRoundEnd(round: number) {
     currentGame.teams['TEAM_B'].score = Object.values(currentGame.teams['TEAM_B'].roundScores).reduce((a,b) => a+b, 0);
 }
 
+function startGameLoop(durationSeconds: number) {
+    if (gameLoopTimer) clearInterval(gameLoopTimer);
+    currentGame.timeRemaining = durationSeconds;
+
+    gameLoopTimer = setInterval(() => {
+        if (!currentGame.isPaused) {
+            currentGame.timeRemaining -= 1;
+            io.emit('gameStateUpdate', getSafeState());
+
+            if (currentGame.timeRemaining <= 0) {
+                if (gameLoopTimer) clearInterval(gameLoopTimer);
+
+                const r = parseInt(stateMachine.state.status.split('_')[1]);
+                if (!isNaN(r)) processRoundEnd(r);
+
+                stateMachine.transition('ROUND_ENDED');
+                io.emit('gameStateUpdate', getSafeState());
+            }
+        }
+    }, 1000);
+}
+
+function getSafeState() {
+  const safeState = JSON.parse(JSON.stringify(stateMachine.state));
+  if (safeState.status !== 'FINAL') {
+      safeState.teams.TEAM_A.score = 0;
+      safeState.teams.TEAM_B.score = 0;
+      safeState.teams.TEAM_A.roundScores = {};
+      safeState.teams.TEAM_B.roundScores = {};
+  }
+  return safeState;
+}
+
 function generateRoundData() {
     clearTimers();
     if (currentGame.status === 'ROUND_1') {
@@ -129,9 +168,14 @@ function generateRoundData() {
         currentGame.roundState = {
             grid,
             optimalTime,
-            bestTimes: { 'TEAM_A': Infinity, 'TEAM_B': Infinity }
+            bestTimes: {
+                'TEAM_A': { time: Infinity, length: Infinity },
+                'TEAM_B': { time: Infinity, length: Infinity }
+            },
+            completedPlayers: []
         };
-        io.emit('roundSpecificData', currentGame.roundState);
+        startGameLoop(120);
+        io.emit('round1:fieldReady', currentGame.roundState);
     } else if (currentGame.status === 'ROUND_2') {
         const netwalkGrids: Record<string, any> = {};
         currentGame.roundState = { netwalkGrids, playerResults: {} };
@@ -140,6 +184,7 @@ function generateRoundData() {
             netwalkGrids[id] = grid;
             io.to(currentGame.players[id].socketId).emit('roundSpecificData', { netwalkGrid: grid });
         });
+        startGameLoop(90);
     } else if (currentGame.status === 'ROUND_3') {
         const mDataA = generateRound3Modules(currentGame.id + 'A');
         const mDataB = generateRound3Modules(currentGame.id + 'B');
@@ -166,6 +211,7 @@ function generateRoundData() {
         sendHints(0);
         activeTimers.push(setTimeout(() => sendHints(1), 20000));
         activeTimers.push(setTimeout(() => sendHints(2), 40000));
+        startGameLoop(120);
     } else if (currentGame.status === 'ROUND_4') {
         currentGame.roundState = { cardResults: {} };
         Object.values(currentGame.players).forEach(p => {
@@ -173,6 +219,7 @@ function generateRoundData() {
             currentGame.roundState.cardResults[p.id] = { cards, currentIdx: 0, correct: 0, answered: 0 };
             io.to(p.socketId).emit('roundSpecificData', { card: cards[0] });
         });
+        startGameLoop(90);
     } else if (currentGame.status === 'ROUND_5') {
         currentGame.roundState = { actionsCompleted: {}, graph: generateRound5Actions(Object.keys(currentGame.players).length) };
         const actions = currentGame.roundState.graph;
@@ -182,36 +229,48 @@ function generateRoundData() {
             io.to(p.socketId).emit('roundSpecificData', { action: actions[i % actions.length] });
             i++;
         });
+        startGameLoop(90);
     } else if (currentGame.status === 'FINAL') {
+        if (gameLoopTimer) clearInterval(gameLoopTimer);
         const stmt = db.prepare('UPDATE games SET is_finished = 1, state = ? WHERE id = ?');
         stmt.run(JSON.stringify(currentGame), currentGame.id);
     }
 }
 
+// Maps active socketIds to canonical internal playerIds
+let socketToPlayerMap: Record<string, string> = {};
+
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  const safeState = JSON.parse(JSON.stringify(stateMachine.state));
-  if (safeState.status !== 'FINAL') {
-      safeState.teams.TEAM_A.score = 0;
-      safeState.teams.TEAM_B.score = 0;
-      safeState.teams.TEAM_A.roundScores = {};
-      safeState.teams.TEAM_B.roundScores = {};
-  }
-  socket.emit('gameStateUpdate', safeState);
+  socket.emit('gameStateUpdate', getSafeState());
 
   socket.on('requestState', () => {
-    socket.emit('gameStateUpdate', safeState);
+      socket.emit('gameStateUpdate', getSafeState());
+  });
+
+  socket.on('reconnect', (data) => {
+      const pId = playerTokenMap[data.token];
+      if (pId && stateMachine.state.players[pId]) {
+          socketToPlayerMap[socket.id] = pId;
+          stateMachine.state.players[pId].socketId = socket.id;
+          stateMachine.state.players[pId].isOnline = true;
+          io.emit('gameStateUpdate', getSafeState());
+          console.log(`Player ${stateMachine.state.players[pId].name} reconnected`);
+      }
   });
 
   socket.on('join', (data) => {
-    const playerId = socket.id;
-    const token = data.token || playerId;
-
     if (stateMachine.state.status !== 'LOBBY') {
       socket.emit('error', 'Регистрация закрыта');
       return;
     }
+
+    const playerId = 'p_' + crypto.randomBytes(8).toString('hex');
+    const token = crypto.randomBytes(16).toString('hex');
+
+    playerTokenMap[token] = playerId;
+    socketToPlayerMap[socket.id] = playerId;
 
     stateMachine.state.players[playerId] = {
       id: playerId,
@@ -221,11 +280,7 @@ io.on('connection', (socket) => {
     };
 
     socket.emit('joined', { playerId, token });
-
-    const safeState2 = JSON.parse(JSON.stringify(stateMachine.state));
-    safeState2.teams.TEAM_A.score = 0;
-    safeState2.teams.TEAM_B.score = 0;
-    io.emit('gameStateUpdate', safeState2);
+    io.emit('gameStateUpdate', getSafeState());
     io.emit('publicEvent', `${data.name} присоединился к игре!`);
   });
 
@@ -287,40 +342,44 @@ io.on('connection', (socket) => {
           generateRoundData();
       }
 
-      const safeState = JSON.parse(JSON.stringify(stateMachine.state));
-      if (safeState.status !== 'FINAL') {
-          safeState.teams.TEAM_A.score = 0;
-          safeState.teams.TEAM_B.score = 0;
-      }
-      io.emit('gameStateUpdate', safeState);
+      io.emit('gameStateUpdate', getSafeState());
       saveGameState(stateMachine.state.id, stateMachine.state);
   });
 
-  socket.on('r1SubmitPath', (path) => {
-      if (stateMachine.state.status !== 'ROUND_1' || stateMachine.state.isPaused) return;
-      const player = stateMachine.state.players[socket.id];
+  socket.on('round1:submitProgram', (path) => {
+      if (stateMachine.state.status !== 'ROUND_1' || stateMachine.state.isPaused || stateMachine.state.timeRemaining <= 0) return;
+      const pId = socketToPlayerMap[socket.id];
+      const player = stateMachine.state.players[pId];
       if (!player || !player.team) return;
 
       const result = evaluatePath(currentGame.roundState.grid, path);
 
-      if (result.success && result.time < currentGame.roundState.bestTimes[player.team]) {
-          currentGame.roundState.bestTimes[player.team] = result.time;
-          io.emit('publicEvent', `Новый лучший маршрут команды ${player.team} от ${player.name}: ${result.time}`);
+      if (result.success) {
+          if (!currentGame.roundState.completedPlayers.includes(pId)) {
+              currentGame.roundState.completedPlayers.push(pId);
+          }
+
+          const currentBest = currentGame.roundState.bestTimes[player.team];
+          if (result.time < currentBest.time || (result.time === currentBest.time && path.length < currentBest.length)) {
+              currentGame.roundState.bestTimes[player.team] = { time: result.time, length: path.length };
+              io.emit('round1:teamBest', { team: player.team, time: result.time, length: path.length, player: player.name });
+          }
       }
 
-      socket.emit('r1Result', result);
+      socket.emit('round1:result', { ...result, length: path.length });
   });
 
   socket.on('r2SubmitNetwork', (cells) => {
       if (stateMachine.state.status !== 'ROUND_2' || stateMachine.state.isPaused) return;
-      const player = stateMachine.state.players[socket.id];
+      const pId = socketToPlayerMap[socket.id];
+      const player = stateMachine.state.players[pId];
       if (!player || !player.team) return;
 
-      const grid = currentGame.roundState.netwalkGrids?.[socket.id];
+      const grid = currentGame.roundState.netwalkGrids?.[pId];
       if (!grid) return;
 
       const res = validateNetwalkSolution(grid, cells);
-      currentGame.roundState.playerResults[socket.id] = res;
+      currentGame.roundState.playerResults[pId] = res;
 
       if (res.isComplete) {
           io.emit('publicEvent', `${player.name} восстановил(а) сеть!`);
@@ -340,7 +399,7 @@ io.on('connection', (socket) => {
 
   socket.on('r4SubmitCard', (cardId, action) => {
       if (stateMachine.state.status !== 'ROUND_4' || stateMachine.state.isPaused) return;
-      const pId = socket.id;
+      const pId = socketToPlayerMap[socket.id];
       const r = currentGame.roundState.cardResults[pId];
       if (!r) return;
 
@@ -371,6 +430,8 @@ io.on('connection', (socket) => {
       const actionDef = currentGame.roundState.graph.find((a: any) => a.id === actionId);
       if (!actionDef) return;
 
+      const pId = socketToPlayerMap[socket.id];
+
       const unmet = actionDef.dependsOn.filter((dep: string) => {
           return !Object.values(currentGame.roundState.actionsCompleted || {}).some((completedList: any) => completedList.includes(dep));
       });
@@ -379,20 +440,21 @@ io.on('connection', (socket) => {
           socket.emit('r5ActionError', { blockedUntil: Date.now() + 3000, message: 'Условия еще не выполнены' });
       } else {
           if (!currentGame.roundState.actionsCompleted) currentGame.roundState.actionsCompleted = {};
-          if (!currentGame.roundState.actionsCompleted[socket.id]) {
-              currentGame.roundState.actionsCompleted[socket.id] = [];
+          if (!currentGame.roundState.actionsCompleted[pId]) {
+              currentGame.roundState.actionsCompleted[pId] = [];
           }
-          if (!currentGame.roundState.actionsCompleted[socket.id].includes(actionId)) {
-              currentGame.roundState.actionsCompleted[socket.id].push(actionId);
+          if (!currentGame.roundState.actionsCompleted[pId].includes(actionId)) {
+              currentGame.roundState.actionsCompleted[pId].push(actionId);
               io.emit('publicEvent', `Выполнено действие: ${actionDef.description}`);
           }
       }
   });
 
   socket.on('disconnect', () => {
-    if (stateMachine.state.players[socket.id]) {
-        stateMachine.state.players[socket.id].isOnline = false;
-        io.emit('gameStateUpdate', stateMachine.state);
+    const pId = socketToPlayerMap[socket.id];
+    if (pId && stateMachine.state.players[pId]) {
+        stateMachine.state.players[pId].isOnline = false;
+        io.emit('gameStateUpdate', getSafeState());
     }
   });
 });

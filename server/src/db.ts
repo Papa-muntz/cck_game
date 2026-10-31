@@ -37,3 +37,19 @@ export function loadGameState(gameId: string): any {
   }
   return null;
 }
+
+export function saveRound1Score(gameId: string, teamAScore: number, teamBScore: number) {
+  try {
+      const stateStr = loadGameState(gameId);
+      if (stateStr) {
+          const state = typeof stateStr === 'string' ? JSON.parse(stateStr) : stateStr;
+          if (state.teams) {
+              state.teams.TEAM_A.roundScores[1] = teamAScore;
+              state.teams.TEAM_B.roundScores[1] = teamBScore;
+              saveGameState(gameId, state);
+          }
+      }
+  } catch(e) {
+      console.error("Error saving round 1 score", e);
+  }
+}

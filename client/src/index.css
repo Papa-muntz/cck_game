@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg-base: #0B1020;
+  --color-team-a: #2EE6D6; /* Turquoise */
+  --color-team-b: #FF8A3D; /* Orange */
+  --color-accent: #45BCEB;
+  --color-success: #34D399;
+  --color-error: #F87171;
+  --color-warning: #FBBF24;
+
+  --color-panel-bg: rgba(26, 32, 53, 0.7);
+  --color-panel-border: rgba(69, 188, 235, 0.3);
+
+  --radius: 12px;
+  --shadow-neon: 0 0 10px rgba(69, 188, 235, 0.2);
+
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg-base);
+  color: #fff;
+  min-height: 100vh;
+  /* Cyberpunk grid background */
+  background-image:
+    linear-gradient(rgba(46, 230, 214, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(46, 230, 214, 0.05) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Exo 2', 'Orbitron', 'Rajdhani', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

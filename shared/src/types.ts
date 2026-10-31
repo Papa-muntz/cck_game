@@ -42,16 +42,15 @@ export interface GameState {
     }
   };
   players: Record<string, Player>;
-
-  // Specific data for active rounds
   roundState: any;
 }
+
+export type RobotCommand = 'FORWARD' | 'TURN_LEFT' | 'TURN_RIGHT';
 
 export interface ClientToServerEvents {
   join: (data: { name: string; token: string }) => void;
   reconnect: (data: { token: string }) => void;
 
-  // Host events
   hostLogin: (password: string) => void;
   createGame: () => void;
   closeRegistration: () => void;
@@ -65,16 +64,13 @@ export interface ClientToServerEvents {
   endRoundEarly: () => void;
   showFinal: () => void;
 
-  // Game events
-  r1SubmitPath: (path: string[]) => void;
+  'round1:submitProgram': (path: RobotCommand[]) => void;
   r2SubmitNetwork: (cells: number[][]) => void;
   r3SubmitModules: (modules: string[]) => void;
   r4SubmitCard: (cardId: string, action: 'ALLOW' | 'BLOCK') => void;
   r5SubmitAction: (actionId: string) => void;
 
-  // Terminal events
   registerTerminal: (code: string) => void;
-
   requestState: () => void;
 }
 
@@ -84,10 +80,15 @@ export interface ServerToClientEvents {
   error: (message: string) => void;
   publicEvent: (message: string) => void;
 
-  // Role/Round specific updates (targeted events)
   playerData: (player: Player) => void;
   roundSpecificData: (data: any) => void;
-  r1Result: (data: { success: boolean, time: number, errorIndex?: number }) => void;
+
+  'round1:fieldReady': (data: any) => void;
+  'round1:start': () => void;
+  'round1:result': (data: { success: boolean, time: number, errorIndex: number, length: number }) => void;
+  'round1:teamBest': (data: { team: Team, time: number, player: string, length: number }) => void;
+  'round1:end': () => void;
+
   r2Result: (data: { success: boolean }) => void;
   r3Error: (data: { blockedUntil: number }) => void;
   r4CardResult: (data: { success: boolean, explanation: string, nextCardIndex: number }) => void;
